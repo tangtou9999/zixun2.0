@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>资讯阅读 (v2.9.1 极速图文版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .lock-clock {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-weight: 200;
+            letter-spacing: -2px;
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.04); }
+        }
+        .cat-sleep {
+            animation: breathe 3s ease-in-out infinite;
+        }
+        button, input, textarea {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative text-gray-900 antialiased bg-white overflow-hidden">
+
+    <!-- 彻底将尺寸锁死为 1px 并放置在最底层，无论任何设备硬件加速都绝对不可能覆盖屏幕变黑 -->
+    <video id="camera-view" class="fixed top-0 left-0 w-px h-px opacity-0 pointer-events-none -z-50" autoplay playsinline webkit-playsinline disablePictureInPicture muted></video>
+
+    <!-- 顶部标题栏与按钮组 -->
+    <div class="absolute top-0 left-0 right-0 h-12 bg-white z-50 flex items-center justify-between px-4 pointer-events-auto border-b border-gray-100">
+        <div class="text-red-500 text-[18px] font-bold whitespace-nowrap tracking-widest flex items-center gap-1 select-none pointer-events-none">
+            <span class="bg-red-500 text-white text-xs px-1 rounded-sm">热点</span>资讯
+        </div>
+        
+        <!-- 控制按钮组：取消是低调优雅的灰色，绝无红色 -->
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap">
+            <button id="btn-start" class="text-gray-700 text-[15px] font-bold py-2 px-1 active:opacity-50 transition-colors">退出</button>
+            <button id="btn-stop" class="hidden text-gray-500 text-[15px] font-bold py-2 px-1 transition-colors active:opacity-50">取消</button>
+            <button id="btn-retry" class="hidden text-orange-500 text-[15px] font-medium py-2 px-1 active:opacity-50 transition-colors">放弃</button>
+            <button id="btn-save" class="hidden text-blue-500 text-[15px] font-bold py-2 px-1 active:opacity-50 transition-colors">确认退出</button>
+        </div>
+    </div>
+
+    <!-- 二级导航栏 -->
+    <div class="absolute top-12 left-0 right-0 h-10 bg-white border-b border-gray-100 z-40 flex px-4 gap-6 pointer-events-auto items-end overflow-x-auto no-scrollbar">
+        <button id="tab-reading" class="text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0">资讯播报</button>
+        <button id="tab-vietnamese" class="text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0">越南语学习</button>
+        <button id="tab-notepad" class="text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0">备忘文案</button>
+        <button id="tab-sleep" class="text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0">息屏</button>
+    </div>
+
+    <!-- 主界面内容区：默认直接内嵌高品质 AI 图文卡片，绝不留白，打开即见完整精美排版 -->
+    <div id="content-container" class="absolute top-[88px] left-0 w-full h-[calc(100vh-132px)] bg-white text-[17px] leading-relaxed p-4 outline-none border-none z-10 overflow-y-auto no-scrollbar">
+        <div class="mb-4">
+            <div class="flex items-center justify-between border-b pb-2 mb-2">
+                <h1 class="text-xl font-bold text-gray-900 tracking-tight">AI 前沿与科技深度观察</h1>
+                <span class="text-xs text-gray-400 font-mono">今日要闻</span>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">精选大模型推理演进、具身智能与算力基建深度干货。</p>
+        </div>
+
+        <div class="flex flex-col gap-5 pb-16">
+            <!-- 卡片 1: 深度推理 -->
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div class="h-32 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 p-4 flex flex-col justify-between text-white relative">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[11px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">深度架构</span>
+                        <span class="text-[11px] opacity-80">8分钟精读</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <svg class="w-7 h-7 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        <span class="text-base font-bold leading-tight drop-shadow">从直觉拟合到 System 2 慢思考机制</span>
+                    </div>
+                </div>
+                <div class="p-4 flex flex-col gap-2">
+                    <h2 class="text-[16px] font-bold text-gray-900 leading-snug">大模型推理进化：为何强化学习成为新一代核心支柱？</h2>
+                    <p class="text-[13px] text-gray-600 leading-relaxed text-justify mt-1">
+                        传统大模型本质上是基于 Next-token 预测的直觉系统。随着强化学习与搜索算法的融合，模型在输出前会自主展开多路径验证与回溯纠错，数学推理与复杂编程能力的可靠度发生了阶跃式提升。
+                    </p>
+                </div>
+            </article>
+
+            <!-- 卡片 2: 具身智能 -->
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div class="h-32 w-full bg-gradient-to-r from-emerald-600 to-teal-500 p-4 flex flex-col justify-between text-white relative">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[11px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">具身智能</span>
+                        <span class="text-[11px] opacity-80">6分钟精读</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <svg class="w-7 h-7 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+                        <span class="text-base font-bold leading-tight drop-shadow">视触觉多模态模型赋能物理机器人</span>
+                    </div>
+                </div>
+                <div class="p-4 flex flex-col gap-2">
+                    <h2 class="text-[16px] font-bold text-gray-900 leading-snug">摆脱传统代码死板动作：机器人如何学会物理空间直觉？</h2>
+                    <p class="text-[13px] text-gray-600 leading-relaxed text-justify mt-1">
+                        具身智能（Embodied AI）正在将大模型从数字屏幕带入实体车间。通过感知物体的材质、摩擦力与受力反馈，机械手已能自主修正抓取姿态，标志着工业智能化从确定性轨迹迈向自适应交互。
+                    </p>
+                </div>
+            </article>
+
+            <!-- 卡片 3: AI Agent 智能体 -->
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div class="h-32 w-full bg-gradient-to-r from-purple-600 to-pink-500 p-4 flex flex-col justify-between text-white relative">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[11px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">智能体生态</span>
+                        <span class="text-[11px] opacity-80">5分钟精读</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <svg class="w-7 h-7 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                        <span class="text-base font-bold leading-tight drop-shadow">自主目标拆解与端到端工作流托管</span>
+                    </div>
+                </div>
+                <div class="p-4 flex flex-col gap-2">
+                    <h2 class="text-[16px] font-bold text-gray-900 leading-snug">从对话助理到数字员工：AI Agent 重塑个人生产力</h2>
+                    <p class="text-[13px] text-gray-600 leading-relaxed text-justify mt-1">
+                        智能体的核心在于长短期记忆、工具调用（Function Calling）与闭环反思。用户只需下达粗粒度目标，Agent 即可跨软件自动完成数据抓取、跨表归纳与报告汇总，成倍释放个体产能。
+                    </p>
+                </div>
+            </article>
+        </div>
+        <div class="text-center text-gray-300 text-xs pb-10">- 已经展示全部精选资讯 -</div>
+    </div>
+
+    <!-- 底部隐蔽的 2026 / Nov 切换栏：颜色极浅淡，绝不显眼 -->
+    <div class="absolute bottom-0 left-0 right-0 h-11 bg-white border-t border-gray-100 z-30 flex items-center justify-between px-6 select-none">
+        <span class="text-[11px] text-gray-200 font-mono tracking-wider">v2.9.1 · CAMERA MODE</span>
+        <div class="flex items-center gap-3">
+            <button id="btn-front" class="text-gray-300 text-[11px] font-light py-1 px-2 transition-all active:text-gray-700">2026</button>
+            <span class="text-gray-200 text-xs">/</span>
+            <button id="btn-back" class="text-gray-200 text-[11px] font-light py-1 px-2 transition-all active:text-gray-700">Nov</button>
+        </div>
+    </div>
+
+    <!-- 息屏锁屏界面：显式标注 style="display: none;" 彻底避免样式冲突误弹 -->
+    <div id="sleep-overlay" style="display: none;" class="fixed inset-0 bg-gradient-to-br from-indigo-900 via-purple-900 to-rose-900 z-[100] flex flex-col justify-between px-6 pt-14 pb-10 opacity-0 transition-opacity duration-300 select-none">
+        <div class="flex justify-between items-center text-white/80 text-xs px-2 pointer-events-none">
+            <span class="font-medium">Carrier</span>
+            <div class="flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.29 19h3.38c1.29.61 2.74.97 4.33.97 4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z"/></svg>
+                <div class="w-5 h-2.5 border border-white/80 rounded-sm p-0.5 flex items-center"><div class="h-full w-3 bg-white rounded-2xs"></div></div>
+            </div>
+        </div>
+
+        <div class="flex flex-col mt-4 pointer-events-none">
+            <div id="lock-date" class="text-white/90 text-[15px] font-medium tracking-wide drop-shadow">10月13日周二 · 农历九月初四</div>
+            <div id="lock-time" class="lock-clock text-white text-[92px] leading-none mt-1 drop-shadow-md">09:30</div>
+        </div>
+
+        <div class="flex flex-col items-center justify-center my-auto pointer-events-none">
+            <div class="cat-sleep bg-white/10 backdrop-blur-md px-6 py-4 rounded-3xl border border-white/20 flex flex-col items-center shadow-xl">
+                <svg class="w-16 h-16 text-amber-200 drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C9.5 2 7.5 3.5 6.5 5.5C5.5 5.2 4.5 5.5 3.8 6.2C2.8 7.2 2.8 8.8 3.8 9.8L5 11C4.4 12.2 4.2 13.6 4.5 15C5 17.5 7 19.5 9.5 20C10.8 20.3 12.2 20.1 13.4 19.5L14.6 20.7C15.6 21.7 17.2 21.7 18.2 20.7C18.9 20 19.2 19 19 18C20.5 17 21.5 15 21.5 12.5C21.5 7.8 17.2 4 12 4V2M8.5 8C9.3 8 10 8.7 10 9.5S9.3 11 8.5 11 7 10.3 7 9.5 7.7 8 8.5 8M15.5 8C16.3 8 17 8.7 17 9.5S16.3 11 15.5 11 14 10.3 14 9.5 14.7 8 15.5 8M11.5 12.5C12.5 12.5 13.5 13.3 13.5 14.3C13.5 14.7 13.2 15 12.8 15.2C12.4 15.4 12 15.5 11.5 15.5S10.6 15.4 10.2 15.2C9.8 15 9.5 14.7 9.5 14.3C9.5 13.3 10.5 12.5 11.5 12.5Z"/>
+                </svg>
+                <div class="text-white/90 text-xs font-medium tracking-widest mt-2 flex items-center gap-1">
+                    <span>Zzz... 正在深度小憩</span>
+                    <span class="animate-bounce">💤</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-between items-center px-4 pointer-events-none">
+            <div class="w-12 h-12 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center text-white/80 border border-white/10">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.03-.42 1.98-1.07 2.75z"/></svg>
+            </div>
+            <div class="w-32 h-1 bg-white/40 rounded-full"></div>
+            <div class="w-12 h-12 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center text-white/80 border border-white/10">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.65.07-.97 0-.32-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.5.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .32.03.65.07.97l-2.11 1.63c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.63z"/></svg>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-[210] flex flex-col gap-2 pointer-events-none"></div>
+    <a id="download-link" class="hidden"></a>
+
+    <script>
+        const state = {
+            isRecording: false,
+            facingMode: 'user',
+            stream: null,
+            mediaRecorder: null,
+            recordedChunks: [],
+            currentTab: 'reading',
+            userNotepadText: "欢迎来到个人备忘/文案小窗口！\n\n你可以在这里自由编写任何想要阅读、背诵或临时记录的台词、文章或备忘录。内容已在本地随时可用。"
+        };
+
+        const els = {
+            video: document.getElementById('camera-view'),
+            btnFront: document.getElementById('btn-front'),
+            btnBack: document.getElementById('btn-back'),
+            btnStart: document.getElementById('btn-start'),
+            btnStop: document.getElementById('btn-stop'),
+            btnRetry: document.getElementById('btn-retry'),
+            btnSave: document.getElementById('btn-save'),
+            contentContainer: document.getElementById('content-container'),
+            downloadLink: document.getElementById('download-link'),
+            tabReading: document.getElementById('tab-reading'),
+            tabVietnamese: document.getElementById('tab-vietnamese'),
+            tabNotepad: document.getElementById('tab-notepad'),
+            tabSleep: document.getElementById('tab-sleep'),
+            sleepOverlay: document.getElementById('sleep-overlay'),
+            lockTime: document.getElementById('lock-time'),
+            lockDate: document.getElementById('lock-date')
+        };
+
+        function updateCameraButtonsUI() {
+            if (state.facingMode === 'user') {
+                els.btnFront.className = "text-gray-500 text-[11px] font-semibold py-1 px-2 transition-all";
+                els.btnBack.className = "text-gray-300 text-[11px] font-light py-1 px-2 transition-all active:text-gray-700";
+            } else {
+                els.btnBack.className = "text-gray-500 text-[11px] font-semibold py-1 px-2 transition-all";
+                els.btnFront.className = "text-gray-300 text-[11px] font-light py-1 px-2 transition-all active:text-gray-700";
+            }
+        }
+
+        function showToast(message, type = 'error') {
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-3 rounded-lg shadow-xl text-[15px] font-medium transition-all duration-300 opacity-0 transform translate-y-[-10px] ${type === 'error' ? 'bg-red-500/90 text-white backdrop-blur' : 'bg-gray-800/90 text-white backdrop-blur'}`;
+            toast.innerText = message;
+            document.getElementById('toast-container').appendChild(toast);
+            requestAnimationFrame(() => {
+                toast.classList.remove('opacity-0', 'translate-y-[-10px]');
+                toast.classList.add('opacity-100', 'translate-y-0');
+            });
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-[-10px]');
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        function renderContent() {
+            if (state.currentTab === 'reading') {
+                els.contentContainer.innerHTML = `
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between border-b pb-2 mb-2">
+                            <h1 class="text-xl font-bold text-gray-900 tracking-tight">AI 前沿与科技深度观察</h1>
+                            <span class="text-xs text-gray-400 font-mono">今日要闻</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">精选大模型推理演进、具身智能与算力基建深度干货。</p>
+                    </div>
+                    <div class="flex flex-col gap-5 pb-16">
+                        <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                            <div class="h-32 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 p-4 flex flex-col justify-between text-white">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[11px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">深度架构</span>
+                                    <span class="text-[11px] opacity-80">8分钟精读</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-7 h-7 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                    <span class="text-base font-bold leading-tight drop-shadow">从直觉拟合到 System 2 慢思考机制</span>
+                                </div>
+                            </div>
+                            <div class="p-4 flex flex-col gap-2">
+                                <h2 class="text-[16px] font-bold text-gray-900 leading-snug">大模型推理进化：为何强化学习成为新一代核心支柱？</h2>
+                                <p class="text-[13px] text-gray-600 leading-relaxed text-justify mt-1">
+                                    传统大模型本质上是基于 Next-token 预测的直觉系统。随着强化学习与搜索算法的融合，模型在输出前会自主展开多路径验证与回溯纠错，数学推理与复杂编程能力的可靠度发生了阶跃式提升。
+                                </p>
+                            </div>
+                        </article>
+                        <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                            <div class="h-32 w-full bg-gradient-to-r from-emerald-600 to-teal-500 p-4 flex flex-col justify-between text-white">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[11px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">具身智能</span>
+                                    <span class="text-[11px] opacity-80">6分钟精读</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-7 h-7 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+                                    <span class="text-base font-bold leading-tight drop-shadow">视触觉多模态模型赋能物理机器人</span>
+                                </div>
+                            </div>
+                            <div class="p-4 flex flex-col gap-2">
+                                <h2 class="text-[16px] font-bold text-gray-900 leading-snug">摆脱传统代码死板动作：机器人如何学会物理空间直觉？</h2>
+                                <p class="text-[13px] text-gray-600 leading-relaxed text-justify mt-1">
+                                    具身智能正在将大模型从数字屏幕带入实体车间。通过感知物体的材质、摩擦力与受力反馈，机械手已能自主修正抓取姿态，标志着工业智能化从确定性轨迹迈向自适应交互。
+                                </p>
+                            </div>
+                        </article>
+                    </div>
+                    <div class="text-center text-gray-300 text-xs pb-10">- 已经展示全部精选资讯 -</div>
+                `;
+            } else if (state.currentTab === 'vietnamese') {
+                const vietPhrases = [
+                    { vn: "Xin chào", zh: "你好", pinyin: "辛卡罗" },
+                    { vn: "Cảm ơn", zh: "谢谢", pinyin: "感恩" },
+                    { vn: "Tạm biệt", zh: "再见", pinyin: "达比亚" },
+                    { vn: "Vâng / Dạ", zh: "是的 / 好", pinyin: "冯 / 扎" },
+                    { vn: "Không", zh: "不 / 不是", pinyin: "康" },
+                    { vn: "Xin lỗi", zh: "对不起", pinyin: "辛洛伊" },
+                    { vn: "Bao nhiêu tiền?", zh: "多少钱？", pinyin: "包尼奥田？" },
+                    { vn: "Ăn cơm chưa?", zh: "吃过饭了吗？", pinyin: "安高朱啊？" },
+                    { vn: "Bạn tên gì?", zh: "你叫什么名字？", pinyin: "班登吉？" },
+                    { vn: "Tôi không hiểu", zh: "我听不懂", pinyin: "多康海欧" }
+                ];
+                let html = `<h1 class="text-xl font-bold mb-2 text-gray-900">越南语核心 100 句精选</h1>`;
+                html += `<p class="text-xs text-gray-500 mb-6 border-b pb-3">标注了最贴近的中文谐音发音，方便您随时随地流利阅读。</p>`;
+                html += `<div class="flex flex-col gap-3 pb-20">`;
+                vietPhrases.forEach((item, idx) => {
+                    html += `
+                        <div class="bg-gray-50 p-3.5 rounded-xl border border-gray-100 flex flex-col gap-1">
+                            <div class="text-xs text-gray-400 font-mono">#${idx + 1}</div>
+                            <div class="text-base font-bold text-blue-600">${item.vn}</div>
+                            <div class="text-sm font-semibold text-gray-800">中文：${item.zh}</div>
+                            <div class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded w-fit mt-1">🗣 中文谐音：${item.pinyin}</div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+                els.contentContainer.innerHTML = html;
+            } else if (state.currentTab === 'notepad') {
+                let html = `
+                    <div class="flex flex-col h-full pb-16">
+                        <div class="flex justify-between items-center mb-4 border-b pb-3">
+                            <h1 class="text-lg font-bold text-gray-900">个人文案与备忘录</h1>
+                            <button id="btn-save-note" class="bg-blue-600 text-white text-xs px-3 py-1.5 rounded-lg font-semibold active:opacity-50">保存文案</button>
+                        </div>
+                        <textarea id="notepad-textarea" class="w-full flex-1 min-h-[350px] p-4 text-gray-800 text-[15px] leading-relaxed border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 resize-none font-sans" placeholder="在此处输入或粘贴你的文案...">${state.userNotepadText}</textarea>
+                    </div>
+                `;
+                els.contentContainer.innerHTML = html;
+                document.getElementById('btn-save-note').addEventListener('click', () => {
+                    state.userNotepadText = document.getElementById('notepad-textarea').value;
+                    showToast("备忘文案已成功保存", "success");
+                });
+            }
+        }
+
+        function switchTab(tabName) {
+            state.currentTab = tabName;
+            [els.tabReading, els.tabVietnamese, els.tabNotepad].forEach(tab => {
+                tab.className = "text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0";
+            });
+            if (tabName === 'reading') {
+                els.tabReading.className = "text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0";
+            } else if (tabName === 'vietnamese') {
+                els.tabVietnamese.className = "text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0";
+            } else if (tabName === 'notepad') {
+                els.tabNotepad.className = "text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0";
+            }
+            renderContent();
+        }
+
+        els.tabReading.addEventListener('click', () => switchTab('reading'));
+        els.tabVietnamese.addEventListener('click', () => switchTab('vietnamese'));
+        els.tabNotepad.addEventListener('click', () => switchTab('notepad'));
+
+        let clockInterval;
+        function updateLockClock() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            els.lockTime.innerText = `${hours}:${minutes}`;
+            const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            els.lockDate.innerText = `${now.getMonth() + 1}月${now.getDate()}日${days[now.getDay()]} · 农历九月初四`;
+        }
+
+        els.tabSleep.addEventListener('click', () => {
+            clearInterval(clockInterval); 
+            updateLockClock();
+            clockInterval = setInterval(updateLockClock, 1000);
+            els.sleepOverlay.style.display = 'flex';
+            requestAnimationFrame(() => els.sleepOverlay.classList.remove('opacity-0'));
+        });
+
+        let unlockClicks = 0;
+        let unlockTimer = null;
+        els.sleepOverlay.addEventListener('click', () => {
+            unlockClicks++;
+            if (unlockClicks >= 3) {
+                els.sleepOverlay.classList.add('opacity-0');
+                setTimeout(() => {
+                    els.sleepOverlay.style.display = 'none';
+                    clearInterval(clockInterval);
+                }, 300); 
+                unlockClicks = 0;
+            }
+            clearTimeout(unlockTimer);
+            unlockTimer = setTimeout(() => { unlockClicks = 0; }, 1000); 
+        });
+
+        async function initCamera() {
+            try {
+                if (state.stream) {
+                    state.stream.getTracks().forEach(track => track.stop());
+                    state.stream = null;
+                }
+                state.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: { echoCancellation: true, noiseSuppression: true }
+                });
+                els.video.srcObject = state.stream;
+                updateCameraButtonsUI();
+            } catch (err) {
+                showToast("请允许访问摄像头与麦克风");
+                state.stream = null;
+            }
+        }
+
+        async function startRecording() {
+            if (state.isRecording) return;
+            try {
+                if (!state.stream) await initCamera(); 
+                if (!state.stream) return; 
+                
+                if (els.downloadLink.href) {
+                    URL.revokeObjectURL(els.downloadLink.href);
+                    els.downloadLink.href = '';
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 200)); 
+                state.recordedChunks = [];
+                let options = { mimeType: 'video/mp4' }; 
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm;codecs=h264' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: '' };
+                
+                state.mediaRecorder = new MediaRecorder(state.stream, options);
+                state.mediaRecorder.ondataavailable = e => { 
+                    if (e.data && e.data.size > 0) state.recordedChunks.push(e.data); 
+                };
+                
+                state.mediaRecorder.onstop = () => {
+                    const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder?.mimeType || 'video/mp4' });
+                    els.downloadLink.href = URL.createObjectURL(blob);
+                    els.downloadLink.download = `Record_${Date.now()}.mp4`;
+                    
+                    // 录制完成时：仅保留“放弃”和“确认退出”，绝无“退出”
+                    els.btnStart.classList.add('hidden');
+                    els.btnStop.classList.add('hidden');
+                    els.btnRetry.classList.remove('hidden');
+                    els.btnSave.classList.remove('hidden');
+                    state.mediaRecorder = null;
+                };
+
+                state.mediaRecorder.start(1000); 
+                state.isRecording = true;
+                
+                // 正在录制时：仅显示低调灰色“取消”
+                els.btnStart.classList.add('hidden');
+                els.btnStop.classList.remove('hidden');
+                els.btnRetry.classList.add('hidden');
+                els.btnSave.classList.add('hidden');
+            } catch (err) {
+                showToast("无法启动录像引擎");
+                els.btnStart.classList.remove('hidden');
+                els.btnStop.classList.add('hidden');
+            }
+        }
+
+        function stopRecording() {
+            if (!state.isRecording) return;
+            state.isRecording = false;
+            if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+                try { state.mediaRecorder.stop(); } catch(err) {}
+            }
+            // 点击取消后，完整还原为单个“退出”按钮
+            els.btnStop.classList.add('hidden');
+            els.btnRetry.classList.add('hidden');
+            els.btnSave.classList.add('hidden');
+            els.btnStart.classList.remove('hidden');
+        }
+
+        els.btnStart.addEventListener('click', startRecording);
+        els.btnStop.addEventListener('click', stopRecording);
+        
+        // 点击“放弃”
+        els.btnRetry.addEventListener('click', () => {
+            if (els.downloadLink.href) {
+                URL.revokeObjectURL(els.downloadLink.href);
+                els.downloadLink.href = '';
+            }
+            state.recordedChunks = [];
+            els.btnRetry.classList.add('hidden');
+            els.btnSave.classList.add('hidden');
+            els.btnStop.classList.add('hidden');
+            els.btnStart.classList.remove('hidden');
+        });
+
+        // 点击“确认退出”（下载保存）
+        els.btnSave.addEventListener('click', () => {
+            els.downloadLink.click();
+            els.btnRetry.classList.add('hidden');
+            els.btnSave.classList.add('hidden');
+            els.btnStop.classList.add('hidden');
+            els.btnStart.classList.remove('hidden');
+        });
+        
+        els.btnFront.addEventListener('click', () => { 
+            if (!state.isRecording && state.facingMode !== 'user') { 
+                state.facingMode = 'user'; 
+                if (state.stream) initCamera();
+                else updateCameraButtonsUI();
+            } else {
+                updateCameraButtonsUI();
+            }
+        });
+        
+        els.btnBack.addEventListener('click', () => { 
+            if (!state.isRecording && state.facingMode !== 'environment') { 
+                state.facingMode = 'environment'; 
+                if (state.stream) initCamera();
+                else updateCameraButtonsUI();
+            } else {
+                updateCameraButtonsUI();
+            }
+        });
+
+        // 立即执行初始化，绝不依赖外部加载状态，杜绝任何白屏或黑屏
+        if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', updateCameraButtonsUI);
+        } else {
+            updateCameraButtonsUI();
+        }
+    </script>
+</body>
+</html>
