@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>资讯阅读</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        button, input, textarea { touch-action: manipulation; }
+        body { height: 100vh; height: 100dvh; }
+        #content-container { height: calc(100vh - 88px); height: calc(100dvh - 88px); }
+    </style>
+</head>
+<body class="h-screen w-screen relative text-gray-900 antialiased bg-white overflow-hidden">
+
+    <!-- 原生视频流，1px 透明放在底层 -->
+    <video id="camera-view" class="fixed top-0 left-0 w-px h-px opacity-0 pointer-events-none -z-50" autoplay playsinline webkit-playsinline disablePictureInPicture muted></video>
+
+    <!-- 顶部标题栏与控制按钮 (退出 -> 取消 -> 放弃 / 确认退出) -->
+    <div class="absolute top-0 left-0 right-0 h-12 bg-white z-50 flex items-center justify-between px-4 pointer-events-auto border-b border-gray-100">
+        <div class="text-red-500 text-[18px] font-bold whitespace-nowrap tracking-widest flex items-center gap-1 select-none pointer-events-none">
+            <span class="bg-red-500 text-white text-xs px-1 rounded-sm">热点</span>资讯
+        </div>
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap">
+            <button id="btn-start" class="text-gray-700 text-[15px] font-bold py-2 px-1 active:opacity-50 transition-colors">退出</button>
+            <button id="btn-stop" class="hidden text-gray-500 text-[15px] font-bold py-2 px-1 transition-colors active:opacity-50">取消</button>
+            <button id="btn-retry" class="hidden text-orange-500 text-[15px] font-medium py-2 px-1 active:opacity-50 transition-colors">放弃</button>
+            <button id="btn-save" class="hidden text-blue-500 text-[15px] font-bold py-2 px-1 active:opacity-50 transition-colors">确认退出</button>
+        </div>
+    </div>
+
+    <!-- 二级导航栏 -->
+    <div class="absolute top-12 left-0 right-0 h-10 bg-white border-b border-gray-100 z-40 flex px-4 gap-6 pointer-events-auto items-end overflow-x-auto no-scrollbar">
+        <button id="tab-reading" class="text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0">资讯播报</button>
+        <button id="tab-notepad" class="text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0">备忘录</button>
+    </div>
+
+    <!-- 内容区 -->
+    <div id="content-container" class="absolute top-[88px] left-0 w-full bg-white text-[17px] leading-relaxed p-4 outline-none border-none z-10 overflow-y-auto no-scrollbar"></div>
+
+    <!-- 弹窗提示 -->
+    <div id="toast-container" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-[210] flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- 摄像头授权引导 -->
+    <div id="cam-help" style="display:none;" class="fixed inset-0 z-[230] bg-black/50 items-end justify-center p-4">
+        <div class="w-full max-w-sm bg-white rounded-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div id="cam-help-title" class="text-[16px] font-bold text-gray-900 mb-2"></div>
+            <ol id="cam-help-steps" class="list-decimal pl-5 text-[14px] text-gray-700 leading-relaxed space-y-1"></ol>
+            <div id="cam-help-diag" class="mt-3 text-[11px] text-gray-400 break-all"></div>
+            <div class="flex gap-2 mt-4">
+                <button id="cam-help-retry" class="flex-1 bg-blue-600 text-white font-bold py-2.5 rounded-xl text-[14px] active:opacity-70">重新请求授权</button>
+                <button id="cam-help-close" class="flex-1 bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-[14px] active:opacity-70">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== 工具 =====
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        const state = {
+            isRecording: false,
+            facingMode: 'user',
+            stream: null,
+            mediaRecorder: null,
+            recordedChunks: [],
+            downloadUrl: '',
+            downloadName: '',
+            currentTab: 'reading',
+            memoText: ''
+        };
+        try { state.memoText = localStorage.getItem('memo_text') || ''; } catch (e) {}
+
+        const els = {
+            video: document.getElementById('camera-view'),
+            btnStart: document.getElementById('btn-start'),
+            btnStop: document.getElementById('btn-stop'),
+            btnRetry: document.getElementById('btn-retry'),
+            btnSave: document.getElementById('btn-save'),
+            contentContainer: document.getElementById('content-container'),
+            tabReading: document.getElementById('tab-reading'),
+            tabNotepad: document.getElementById('tab-notepad')
+        };
+
+        function showToast(message, type = 'error') {
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-2.5 rounded-xl shadow-lg text-[14px] font-medium transition-all duration-300 opacity-0 transform translate-y-[-10px] ${type === 'error' ? 'bg-red-500/90 text-white backdrop-blur' : (type === 'success' ? 'bg-emerald-600/90 text-white backdrop-blur' : 'bg-gray-900/90 text-white backdrop-blur')}`;
+            toast.innerText = message;
+            document.getElementById('toast-container').appendChild(toast);
+            requestAnimationFrame(() => {
+                toast.classList.remove('opacity-0', 'translate-y-[-10px]');
+                toast.classList.add('opacity-100', 'translate-y-0');
+            });
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-[-10px]');
+                setTimeout(() => toast.remove(), 300);
+            }, 2300);
+        }
+
+        // ===== 前后摄像头切换按钮（资讯页右上角 2026 / Nov）=====
+        function updateCameraButtonsUI() {
+            const btnF = document.getElementById('btn-front');
+            const btnB = document.getElementById('btn-back');
+            if (!btnF || !btnB) return;
+            if (state.facingMode === 'user') {
+                btnF.className = "text-gray-600 font-semibold px-0.5 transition-colors";
+                btnB.className = "text-gray-400 font-normal px-0.5 hover:text-gray-600 transition-colors";
+            } else {
+                btnB.className = "text-gray-600 font-semibold px-0.5 transition-colors";
+                btnF.className = "text-gray-400 font-normal px-0.5 hover:text-gray-600 transition-colors";
+            }
+        }
+
+        // ===== 页面内容 =====
+        function renderContent() {
+            if (state.currentTab === 'reading') {
+                els.contentContainer.innerHTML = `
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between border-b pb-2 mb-2">
+                            <h1 class="text-xl font-bold text-gray-900 tracking-tight">AI 前沿与科技深度观察</h1>
+                            <div class="flex items-center gap-1 text-xs text-gray-400 font-mono select-none">
+                                <span>今日要闻</span>
+                                <span class="text-gray-300">·</span>
+                                <button id="btn-front" class="text-gray-500 font-semibold px-0.5 hover:text-gray-700 transition-colors active:opacity-60">2026</button>
+                                <span class="text-gray-300">/</span>
+                                <button id="btn-back" class="text-gray-400 font-normal px-0.5 hover:text-gray-700 transition-colors active:opacity-60">Nov</button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">精选大模型推理演进、具身智能与算力基建深度干货。</p>
+                    </div>
+                    <div class="flex flex-col gap-4 pb-20">
+                        <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                            <div class="h-28 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 p-3.5 flex flex-col justify-between text-white">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[10px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">深度架构</span>
+                                    <span class="text-[10px] opacity-80">8分钟精读</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold leading-tight drop-shadow">从直觉拟合到 System 2 慢思考机制</span>
+                                </div>
+                            </div>
+                            <div class="p-3.5 flex flex-col gap-1.5">
+                                <h2 class="text-[15px] font-bold text-gray-900 leading-snug">大模型推理进化：为何强化学习成为新一代核心支柱？</h2>
+                                <p class="text-[13px] text-gray-600 leading-relaxed text-justify">
+                                    传统大模型本质上是基于 Next-token 预测的直觉系统。随着强化学习与搜索算法的融合，模型在输出前会自主展开多路径验证与回溯纠错，数学推理与复杂编程能力的可靠度发生了阶跃式提升。
+                                </p>
+                            </div>
+                        </article>
+
+                        <article class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                            <div class="h-28 w-full bg-gradient-to-r from-emerald-600 to-teal-500 p-3.5 flex flex-col justify-between text-white">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[10px] font-semibold bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full">具身智能</span>
+                                    <span class="text-[10px] opacity-80">6分钟精读</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold leading-tight drop-shadow">端到端世界模型赋能物理机器人</span>
+                                </div>
+                            </div>
+                            <div class="p-3.5 flex flex-col gap-1.5">
+                                <h2 class="text-[15px] font-bold text-gray-900 leading-snug">摆脱传统代码死板动作：机器人如何学会物理空间直觉？</h2>
+                                <p class="text-[13px] text-gray-600 leading-relaxed text-justify">
+                                    具身智能正在将大模型从数字屏幕带入实体车间。通过感知物体的材质、摩擦力与受力反馈，机械手已能自主修正抓取姿态，标志着工业智能化从确定性轨迹迈向自适应交互。
+                                </p>
+                            </div>
+                        </article>
+                    </div>
+                    <div class="text-center text-gray-300 text-xs pb-10">- 已经展示全部精选资讯 -</div>
+                `;
+                updateCameraButtonsUI();
+            } else {
+                renderMemo();
+            }
+        }
+
+        // ===== 最简备忘录：自动保存在本机浏览器 =====
+        function renderMemo() {
+            els.contentContainer.innerHTML = `<textarea id="memo-input" class="w-full h-full resize-none outline-none border-none bg-white text-[17px] leading-relaxed" placeholder="在这里写点什么……"></textarea>`;
+            const ta = document.getElementById('memo-input');
+            ta.value = state.memoText;
+            ta.addEventListener('input', () => {
+                state.memoText = ta.value;
+                try { localStorage.setItem('memo_text', ta.value); } catch (e) {}
+            });
+        }
+
+        function switchTab(tabName) {
+            state.currentTab = tabName;
+            const off = "text-gray-400 text-[15px] font-medium pb-2 transition-all active:opacity-50 shrink-0";
+            const on = "text-gray-900 text-[15px] font-bold border-b-2 border-gray-900 pb-2 transition-all shrink-0";
+            els.tabReading.className = tabName === 'reading' ? on : off;
+            els.tabNotepad.className = tabName === 'notepad' ? on : off;
+            renderContent();
+        }
+        els.tabReading.addEventListener('click', () => switchTab('reading'));
+        els.tabNotepad.addEventListener('click', () => switchTab('notepad'));
+
+        // ===== 摄像头授权引导 =====
+        function hideCameraHelp() {
+            document.getElementById('cam-help').style.display = 'none';
+        }
+
+        function showCameraHelp(kind, errName) {
+            const ua = navigator.userAgent || '';
+            const isIOS = /iPhone|iPad|iPod/i.test(ua);
+            let inIframe = false;
+            try { inIframe = window.self !== window.top; } catch (e) { inIframe = true; }
+            const apps = [[/MicroMessenger/i, '微信'], [/aweme|Bytedance|musical_ly/i, '抖音'], [/AlipayClient/i, '支付宝'],
+                          [/Weibo/i, '微博'], [/DingTalk/i, '钉钉'], [/\bQQ\//, 'QQ'], [/Quark/i, '夸克']];
+            const inApp = (apps.find(([re]) => re.test(ua)) || [])[1];
+            const insecure = location.protocol === 'file:' || !window.isSecureContext;
+            const envIssue = kind === 'denied' || kind === 'insecure';
+
+            let title = '', steps = [], canRetry = true;
+            if (envIssue && inIframe) {
+                title = '页面被嵌在预览框里，预览框不允许调用摄像头';
+                steps = ['聊天软件 / 文件预览里的页面是沙盒环境，永远弹不出授权', '请把页面放到 HTTPS 网址上，再用手机系统浏览器（Safari / Chrome）打开'];
+                canRetry = false;
+            } else if (envIssue && inApp) {
+                title = '当前是「' + inApp + '」内置浏览器，无法弹出授权';
+                steps = ['点右上角「···」', '选择「在浏览器中打开」或「用 Safari / 默认浏览器打开」', '在系统浏览器里再点一次开始'];
+                canRetry = false;
+            } else if (envIssue && insecure) {
+                title = '页面不是通过 HTTPS 打开的，浏览器不会弹出授权';
+                steps = ['直接打开本地文件（file://）或 http:// 网址，手机浏览器都不会弹授权', '把页面放到 HTTPS 网址（如 GitHub Pages、Cloudflare Pages、Netlify）后再访问'];
+                canRetry = false;
+            } else if (kind === 'insecure') {
+                title = '当前浏览器不支持调用摄像头';
+                steps = ['请换用系统自带的 Safari（iOS 14.3+）或 Chrome'];
+                canRetry = false;
+            } else if (kind === 'denied') {
+                title = '摄像头 / 麦克风权限被拒绝了';
+                steps = isIOS
+                    ? ['点地址栏左侧的「aA」→「网站设置」→ 摄像头、麦克风都选「允许」', '若没有该选项：手机「设置」→ Safari → 摄像头 / 麦克风 → 选「询问」或「允许」', '回到本页，点下方「重新请求授权」（或刷新页面）']
+                    : ['点地址栏左侧的锁形 / 设置图标 →「权限」→ 摄像头、麦克风都设为「允许」', '若仍无效：手机「设置」→ 应用 → 你的浏览器 → 权限 → 打开摄像头和麦克风', '回到本页，点下方「重新请求授权」（或刷新页面）'];
+            } else if (kind === 'notfound') {
+                title = '没有检测到可用的摄像头或麦克风';
+                steps = ['检查设备是否有摄像头 / 麦克风', '若切换过前后摄像头，换回另一个试试'];
+            } else if (kind === 'busy') {
+                title = '摄像头正被其他应用占用';
+                steps = ['关闭其他正在使用摄像头的应用（相机、视频通话等）', '然后点下方「重新请求授权」'];
+            } else {
+                title = '摄像头启动失败';
+                steps = ['请刷新页面后重试', '若反复失败，换用系统浏览器再试'];
+            }
+
+            document.getElementById('cam-help-title').textContent = title;
+            document.getElementById('cam-help-steps').innerHTML = steps.map(s => '<li>' + esc(s) + '</li>').join('');
+            document.getElementById('cam-help-diag').textContent =
+                '诊断：协议 ' + location.protocol + ' · 安全环境 ' + window.isSecureContext + ' · 嵌入 ' + inIframe + (inApp ? ' · 内置浏览器 ' + inApp : '') + (errName ? ' · 错误 ' + errName : '');
+            document.getElementById('cam-help-retry').style.display = canRetry ? '' : 'none';
+            document.getElementById('cam-help').style.display = 'flex';
+        }
+
+        document.getElementById('cam-help-close').addEventListener('click', hideCameraHelp);
+        document.getElementById('cam-help-retry').addEventListener('click', async () => {
+            hideCameraHelp();
+            await initCamera();
+            if (state.stream) showToast("摄像头已就绪", "success");
+        });
+
+        // ===== 长时间录像：保持屏幕常亮 =====
+        let wakeLockSentinel = null;
+        let hiddenWhileRecording = false;
+
+        async function acquireWakeLock(notifyIfUnsupported) {
+            if (!('wakeLock' in navigator)) {
+                if (notifyIfUnsupported) showToast("此浏览器不支持屏幕常亮，请在手机设置里把「自动锁定」改为「永不」", "neutral");
+                return;
+            }
+            try {
+                if (wakeLockSentinel) return;
+                wakeLockSentinel = await navigator.wakeLock.request('screen');
+                wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+            } catch (e) { wakeLockSentinel = null; }
+        }
+        function releaseWakeLock() {
+            try { if (wakeLockSentinel) wakeLockSentinel.release(); } catch (e) {}
+            wakeLockSentinel = null;
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                if (state.isRecording) hiddenWhileRecording = true;
+            } else if (state.isRecording) {
+                acquireWakeLock(false);
+                if (hiddenWhileRecording) showToast("页面曾切到后台，录像可能有中断，请检查成片");
+                hiddenWhileRecording = false;
+            }
+        });
+
+        // ===== 摄像头初始化 =====
+        async function initCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showCameraHelp('insecure');
+                return;
+            }
+            try {
+                if (state.stream) {
+                    state.stream.getTracks().forEach(track => track.stop());
+                    state.stream = null;
+                }
+                const constraints = {
+                    video: {
+                        facingMode: state.facingMode,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: true
+                };
+
+                try {
+                    state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (firstErr) {
+                    // 被拒绝就直接报错，不要重复弹授权；其余情况（机型对参数严苛）降级为标准流
+                    if (firstErr && (firstErr.name === 'NotAllowedError' || firstErr.name === 'SecurityError')) throw firstErr;
+                    state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                }
+
+                els.video.srcObject = state.stream;
+                try { await els.video.play(); } catch (e) {}
+                updateCameraButtonsUI();
+            } catch (err) {
+                console.error("摄像头初始化失败:", err);
+                const nm = err && err.name;
+                const kind = (nm === 'NotAllowedError' || nm === 'SecurityError') ? 'denied'
+                           : (nm === 'NotFoundError' || nm === 'OverconstrainedError') ? 'notfound'
+                           : (nm === 'NotReadableError' || nm === 'AbortError') ? 'busy' : 'other';
+                showCameraHelp(kind, nm);
+                state.stream = null;
+            }
+        }
+
+        // ===== 按钮状态 =====
+        function showIdleButtons() {
+            els.btnStart.classList.remove('hidden');
+            els.btnStop.classList.add('hidden');
+            els.btnRetry.classList.add('hidden');
+            els.btnSave.classList.add('hidden');
+        }
+        function showRecordingButtons() {
+            els.btnStart.classList.add('hidden');
+            els.btnStop.classList.remove('hidden');
+            els.btnRetry.classList.add('hidden');
+            els.btnSave.classList.add('hidden');
+        }
+        function showReviewButtons() {
+            els.btnStart.classList.add('hidden');
+            els.btnStop.classList.add('hidden');
+            els.btnRetry.classList.remove('hidden');
+            els.btnSave.classList.remove('hidden');
+        }
+        function releaseDownloadUrl() {
+            if (state.downloadUrl) {
+                URL.revokeObjectURL(state.downloadUrl);
+                state.downloadUrl = '';
+            }
+        }
+
+        // ===== 开始录像 =====
+        async function startRecording() {
+            if (state.isRecording) return;
+            if (!window.MediaRecorder) {
+                showToast("当前浏览器不支持录像，请升级系统或换用 Chrome / Safari");
+                return;
+            }
+            try {
+                if (!state.stream) await initCamera();
+                if (!state.stream) return;
+
+                if (els.video.paused) {
+                    try { await els.video.play(); } catch (e) {}
+                }
+
+                releaseDownloadUrl();
+                state.recordedChunks = [];
+
+                // 选取手机与剪映支持的最佳编码容器
+                const candidates = [
+                    'video/mp4;codecs=avc1,mp4a.40.2',
+                    'video/mp4',
+                    'video/webm;codecs=h264,opus',
+                    'video/webm;codecs=vp8,opus',
+                    'video/webm'
+                ];
+                const selectedMime = candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+                const options = { audioBitsPerSecond: 128000, videoBitsPerSecond: 3000000 };
+                if (selectedMime) options.mimeType = selectedMime;
+
+                let rec;
+                try {
+                    rec = new MediaRecorder(state.stream, options);
+                } catch (optErr) {
+                    rec = new MediaRecorder(state.stream);
+                }
+                state.mediaRecorder = rec;
+
+                rec.ondataavailable = e => {
+                    if (e.data && e.data.size > 0) state.recordedChunks.push(e.data);
+                };
+
+                rec.onerror = (e) => {
+                    console.error("MediaRecorder 错误:", e);
+                    state.isRecording = false;
+                    releaseWakeLock();
+                    state.mediaRecorder = null;
+                    showToast("录像出错，已停止，请重试");
+                    showIdleButtons();
+                };
+
+                rec.onstop = () => {
+                    state.isRecording = false;
+                    releaseWakeLock();
+                    const outputType = rec.mimeType || selectedMime || 'video/mp4';
+                    const blob = new Blob(state.recordedChunks, { type: outputType });
+                    state.mediaRecorder = null;
+                    if (!blob.size) {
+                        showToast("没有录到内容，请重试");
+                        showIdleButtons();
+                        return;
+                    }
+                    state.downloadUrl = URL.createObjectURL(blob);
+                    state.downloadName = `Record_${Date.now()}.${outputType.includes('webm') ? 'webm' : 'mp4'}`;
+                    showReviewButtons();
+                };
+
+                // 不设切片，整段录制
+                rec.start();
+                state.isRecording = true;
+                hiddenWhileRecording = false;
+                acquireWakeLock(true);
+                showRecordingButtons();
+            } catch (err) {
+                console.error("录像启动异常:", err);
+                showToast("录像服务启动失败，请重试");
+                state.isRecording = false;
+                state.mediaRecorder = null;
+                showIdleButtons();
+            }
+        }
+
+        // ===== 停止录制 =====
+        function stopRecording() {
+            if (!state.isRecording) return;
+            state.isRecording = false;
+            releaseWakeLock();
+            if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+                try {
+                    state.mediaRecorder.stop();
+                } catch (err) {
+                    console.error(err);
+                    state.mediaRecorder = null;
+                    showIdleButtons();
+                }
+            } else {
+                showIdleButtons();
+            }
+        }
+
+        els.btnStart.addEventListener('click', startRecording);
+        els.btnStop.addEventListener('click', stopRecording);
+
+        // 放弃当前录像
+        els.btnRetry.addEventListener('click', () => {
+            releaseDownloadUrl();
+            state.recordedChunks = [];
+            showIdleButtons();
+        });
+
+        // 确认退出（下载视频）
+        els.btnSave.addEventListener('click', () => {
+            if (!state.downloadUrl) return;
+            const a = document.createElement('a');
+            a.href = state.downloadUrl;
+            a.download = state.downloadName;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            showIdleButtons();
+        });
+
+        // ===== 切换前后摄像头（资讯页 2026 / Nov）=====
+        document.addEventListener('click', (e) => {
+            if (e.target && e.target.id === 'btn-front') {
+                if (!state.isRecording && state.facingMode !== 'user') {
+                    state.facingMode = 'user';
+                    if (state.stream) initCamera();
+                    else updateCameraButtonsUI();
+                } else {
+                    updateCameraButtonsUI();
+                }
+            } else if (e.target && e.target.id === 'btn-back') {
+                if (!state.isRecording && state.facingMode !== 'environment') {
+                    state.facingMode = 'environment';
+                    if (state.stream) initCamera();
+                    else updateCameraButtonsUI();
+                } else {
+                    updateCameraButtonsUI();
+                }
+            }
+        });
+
+        // 初始化
+        renderContent();
+    </script>
+</body>
+</html>
